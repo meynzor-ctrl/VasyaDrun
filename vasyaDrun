@@ -1,348 +1,273 @@
 --[[
-    VasyaDrun PRIVATE V16 — REBORN
-    - REMOVED: Hitbox Expander (To prevent bans)
-    - FIXED: Silent Aim (New Raycast Redirection)
-    - FIXED: ESP (Optimized Render)
-    - FIXED: Binds & FOV
-    - VOLUME: 600+ Lines of logic
+    VasyaDrun PRIVATE V17 (OLD CORE RESTORED)
+    - SILENT AIM: RESTORED (Old Method)
+    - ESP: GOD MODE (Skeletons, Arrows, Corners)
+    - NEW: FLY SYSTEM ADDED
 ]]
 
--- ==========================================================
--- [1] CORE SYSTEM & PROTECTION
--- ==========================================================
+-- 1. ЗАГРУЗКА БИБЛИОТЕК
+local library = loadstring(game:HttpGet("https://raw.githubusercontent.com/nfpw/XXSCRIPT/heads/main/Library/Module.lua"))()
+local SkelLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/Blissful4992/ESPs/main/UniversalSkeleton.lua"))()
+
+local window = library:CreateWindow({
+    Color = Color3.fromRGB(255, 255, 255),
+    Keybind = Enum.KeyCode.Delete,
+    InitialHeight = 500, -- Немного увеличил высоту для новой вкладки
+    InitialWidth = 550
+}, gethui())
+
+library:SetWindowName("VasyaDrun | GOD MODE V17")
+
+-- 2. СЕРВИСЫ И НАСТРОЙКИ
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UIS = game:GetService("UserInputService")
-local Lighting = game:GetService("Lighting")
-local TWS = game:GetService("TweenService")
-local Debris = game:GetService("Debris")
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
--- Безопасная загрузка библиотеки
-local success, library = pcall(function()
-    return loadstring(game:HttpGet("https://raw.githubusercontent.com/nfpw/XXSCRIPT/heads/main/Library/Module.lua"))()
-end)
+_G.SilentAimEnabled = false
+_G.TargetPart = "Head"
+_G.FOVSize = 150
+_G.WallCheck = false
+_G.EspEnabled = false
 
-if not success then 
-    warn("Library failed to load. Check your internet connection.")
-    return 
-end
+-- Настройки Fly
+_G.FlyEnabled = false
+_G.FlySpeed = 50
+local isFlying = false
+local flyBV, flyBG
 
--- ==========================================================
--- [2] INTERNAL SETTINGS (GLOBAL SCOPE)
--- ==========================================================
-getgenv().VasyaV16 = {
-    Combat = {
-        SilentAim = false,
-        FOV = 150,
-        HitPart = "Head",
-        VisibleCheck = true,
-        Priority = "Closest"
-    },
-    Visuals = {
-        EspEnabled = false,
-        Boxes = false,
-        Names = false,
-        Tracers = false, -- Линии ESP
-        BulletTracers = false, -- Трассеры пуль
-        FovValue = 70,
-        FullBright = false,
-        SkyboxCosmos = false
-    },
-    Movement = {
-        WalkSpeed = 16,
-        Fly = false,
-        FlySpeed = 50,
-        FlyKey = Enum.KeyCode.F
-    }
+local target = { enabled = true, position = nil }
+
+-- Настройки стрелочек
+local ArrowSettings = {
+    DistFromCenter = 80,
+    Height = 16,
+    Width = 16,
+    Color = Color3.fromRGB(255, 255, 255)
 }
 
-local CurrentTarget = nil
-local FlyActive = false
-local BodyVel, BodyGyro
-
--- ==========================================================
--- [3] ТЕХНОЛОГИЯ SILENT AIM (REDIRECTION V2)
--- ==========================================================
-local function IsVisible(part)
-    if not getgenv().VasyaV16.Combat.VisibleCheck then return true end
-    local castPoints = {part.Position}
-    local ignoreList = {LocalPlayer.Character, Camera}
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = ignoreList
-    
-    local result = workspace:Raycast(Camera.CFrame.Position, (part.Position - Camera.CFrame.Position).Unit * 1000, params)
-    return result and result.Instance:IsDescendantOf(part.Parent)
+-- 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (Silent Aim & Math)
+local function isVisible(part, character)
+    local origin = Camera.CFrame.Position
+    local destination = part.Position
+    local direction = (destination - origin).Unit * (destination - origin).Magnitude
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterDescendantsInstances = {LocalPlayer.Character, Camera}
+    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+    local result = workspace:Raycast(origin, direction, raycastParams)
+    return result and result.Instance:IsDescendantOf(character)
 end
 
-local function GetBestTarget()
-    local target = nil
-    local maxDist = getgenv().VasyaV16.Combat.FOV
-    local mousePos = UIS:GetMouseLocation()
-
-    for _, plr in pairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer and plr.Character and plr.Character:FindFirstChild("Humanoid") then
-            local humanoid = plr.Character.Humanoid
-            local part = plr.Character:FindFirstChild(getgenv().VasyaV16.Combat.HitPart)
-            
-            if humanoid.Health > 0 and part then
-                local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
-                
-                if onScreen then
-                    local mag = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-                    if mag < maxDist then
-                        if IsVisible(part) then
-                            maxDist = mag
-                            target = part
-                        end
-                    end
-                end
-            end
+local function getClosestTarget()
+    local closestDist = _G.FOVSize
+    local closestPos = nil
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+        local char = player.Character
+        if not char or not char:FindFirstChild("Humanoid") or char.Humanoid.Health <= 0 then continue end
+        local aimPart = char:FindFirstChild(_G.TargetPart) or char:FindFirstChild("HumanoidRootPart")
+        if not aimPart then continue end
+        if _G.WallCheck and not isVisible(aimPart, char) then continue end
+        local screenPos, onScreen = Camera:WorldToViewportPoint(aimPart.Position)
+        if not onScreen then continue end
+        local mousePos = UIS:GetMouseLocation()
+        local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+        if dist < closestDist then
+            closestDist = dist
+            closestPos = aimPart.Position
         end
     end
-    return target
+    return closestPos
 end
 
--- Основной хук для Сайлента
+local function GetRelative(pos, char)
+    if not char or not char.PrimaryPart then return Vector2.new(0,0) end
+    local camP = Camera.CFrame.Position
+    local relative = CFrame.new(Vector3.new(char.PrimaryPart.Position.X, camP.Y, char.PrimaryPart.Position.Z), camP):PointToObjectSpace(pos)
+    return Vector2.new(relative.X, relative.Z)
+end
+
+local function RotateVect(v, a)
+    a = math.rad(a)
+    return Vector2.new(v.x * math.cos(a) - v.y * math.sin(a), v.x * math.sin(a) + v.y * math.cos(a))
+end
+
+-- 4. ХУК RAYCAST
 local oldNamecall
 oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-    local method = getnamecallmethod()
     local args = {...}
-
-    if getgenv().VasyaV16.Combat.SilentAim and CurrentTarget then
-        -- Перехватываем Raycast, FindPartOnRay и даже FireServer (в некоторых играх)
-        if method == "Raycast" and not checkcaller() then
-            args[2] = (CurrentTarget.Position - args[1]).Unit * 1000
-            return oldNamecall(self, unpack(args))
-        elseif (method == "FindPartOnRay" or method == "FindPartOnRayWithIgnoreList") and not checkcaller() then
-            args[1] = Ray.new(args[1].Origin, (CurrentTarget.Position - args[1].Origin).Unit * 1000)
-            return oldNamecall(self, unpack(args))
-        end
+    local method = getnamecallmethod():lower()
+    if _G.SilentAimEnabled and target.position and method == "raycast" and self.Name == "Workspace" then
+        args[2] = (target.position - args[1]).Unit * 1000
+        return oldNamecall(self, table.unpack(args))
     end
-
     return oldNamecall(self, ...)
 end))
 
--- Дополнительный хук для игр на FastCast / Mouse.Hit
-local oldIndex
-oldIndex = hookmetamethod(game, "__index", newcclosure(function(self, index)
-    if getgenv().VasyaV16.Combat.SilentAim and CurrentTarget and not checkcaller() then
-        if self:IsA("Mouse") and (index == "Hit" or index == "Target") then
-            return (index == "Hit" and CurrentTarget.CFrame or CurrentTarget)
-        end
-    end
-    return oldIndex(self, index)
-end))
-
--- ==========================================================
--- [4] ВИЗУАЛЬНЫЕ ТРАССЕРЫ (BULLET PATH)
--- ==========================================================
-local function CreateBulletTracer(targetPos)
-    if not getgenv().VasyaV16.Visuals.BulletTracers then return end
-    local char = LocalPlayer.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+-- 5. ГЛАВНАЯ ФУНКЦИЯ ESP
+local function MainESP(plr)
+    local Library = {
+        TL1 = Drawing.new("Line"), TL2 = Drawing.new("Line"),
+        TR1 = Drawing.new("Line"), TR2 = Drawing.new("Line"),
+        BL1 = Drawing.new("Line"), BL2 = Drawing.new("Line"),
+        BR1 = Drawing.new("Line"), BR2 = Drawing.new("Line")
+    }
+    local NameTag = Drawing.new("Text")
+    NameTag.Center = true NameTag.Outline = true NameTag.Size = 13 NameTag.Font = 2
     
-    task.spawn(function()
-        local startPos = char.HumanoidRootPart.Position
-        local beam = Instance.new("Part")
-        beam.Parent = workspace
-        beam.Anchored = true
-        beam.CanCollide = false
-        beam.Material = Enum.Material.Neon
-        beam.Color = Color3.fromRGB(0, 255, 150)
-        beam.Transparency = 0.3
-        
-        local dist = (startPos - targetPos).Magnitude
-        beam.Size = Vector3.new(0.1, 0.1, dist)
-        beam.CFrame = CFrame.new(startPos:Lerp(targetPos, 0.5), targetPos)
-        
-        local tween = TWS:Create(beam, TweenInfo.new(0.5), {Transparency = 1, Size = Vector3.new(0,0,dist)})
-        tween:Play()
-        tween.Completed:Connect(function() beam:Destroy() end)
+    local Arrow = Drawing.new("Triangle")
+    Arrow.Filled = true Arrow.Transparency = 1 Arrow.Thickness = 1
+
+    local skel = SkelLib:NewSkeleton(plr, true)
+    local oripart = Instance.new("Part")
+    oripart.Transparency = 1 oripart.CanCollide = false oripart.Parent = workspace
+
+    local con
+    con = RunService.RenderStepped:Connect(function()
+        if _G.EspEnabled and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") and plr.Character.Humanoid.Health > 0 then
+            local root = plr.Character.HumanoidRootPart
+            local hum = plr.Character.Humanoid
+            local screenPos, vis = Camera:WorldToViewportPoint(root.Position)
+            
+            skel:SetVisible(true)
+            local rainbow = Color3.fromHSV(tick() % 5 / 5, 0.7, 1)
+
+            if vis then
+                Arrow.Visible = false
+                oripart.Size = Vector3.new(root.Size.X, root.Size.Y * 1.5, root.Size.Z)
+                oripart.CFrame = CFrame.new(root.CFrame.Position, Camera.CFrame.Position)
+                
+                local TL = Camera:WorldToViewportPoint((oripart.CFrame * CFrame.new(oripart.Size.X, oripart.Size.Y, 0)).p)
+                local TR = Camera:WorldToViewportPoint((oripart.CFrame * CFrame.new(-oripart.Size.X, oripart.Size.Y, 0)).p)
+                local BL = Camera:WorldToViewportPoint((oripart.CFrame * CFrame.new(oripart.Size.X, -oripart.Size.Y, 0)).p)
+                local BR = Camera:WorldToViewportPoint((oripart.CFrame * CFrame.new(-oripart.Size.X, -oripart.Size.Y, 0)).p)
+
+                local offset = math.clamp(1/(Camera.CFrame.p - root.Position).magnitude * 750, 2, 300)
+
+                for _, line in pairs(Library) do line.Visible = true line.Color = rainbow line.Thickness = 2 end
+                Library.TL1.From = Vector2.new(TL.X, TL.Y) Library.TL1.To = Vector2.new(TL.X + offset, TL.Y)
+                Library.TL2.From = Vector2.new(TL.X, TL.Y) Library.TL2.To = Vector2.new(TL.X, TL.Y + offset)
+                Library.TR1.From = Vector2.new(TR.X, TR.Y) Library.TR1.To = Vector2.new(TR.X - offset, TR.Y)
+                Library.TR2.From = Vector2.new(TR.X, TR.Y) Library.TR2.To = Vector2.new(TR.X, TR.Y + offset)
+                Library.BL1.From = Vector2.new(BL.X, BL.Y) Library.BL1.To = Vector2.new(BL.X + offset, BL.Y)
+                Library.BL2.From = Vector2.new(BL.X, BL.Y) Library.BL2.To = Vector2.new(BL.X, BL.Y - offset)
+                Library.BR1.From = Vector2.new(BR.X, BR.Y) Library.BR1.To = Vector2.new(BR.X - offset, BR.Y)
+                Library.BR2.From = Vector2.new(BR.X, BR.Y) Library.BR2.To = Vector2.new(BR.X, BR.Y - offset)
+
+                NameTag.Visible = true
+                NameTag.Position = Vector2.new(TL.X + (TR.X - TL.X)/2, TL.Y - 20)
+                NameTag.Text = string.format("%s [%d HP]", plr.Name, math.floor(hum.Health))
+                NameTag.Color = Color3.fromHSV(math.clamp(hum.Health/hum.MaxHealth, 0, 1) * 0.35, 0.9, 1)
+            else
+                for _, v in pairs(Library) do v.Visible = false end
+                NameTag.Visible = false
+                
+                if LocalPlayer.Character and LocalPlayer.Character.PrimaryPart then
+                    local rel = GetRelative(root.Position, LocalPlayer.Character)
+                    local direction = rel.unit
+                    local base = direction * ArrowSettings.DistFromCenter
+                    local tip = direction * (ArrowSettings.DistFromCenter + ArrowSettings.Height)
+                    local sideL = base + RotateVect(direction, 90) * (ArrowSettings.Width/2)
+                    local sideR = base + RotateVect(direction, -90) * (ArrowSettings.Width/2)
+                    
+                    local center = Camera.ViewportSize/2
+                    Arrow.PointA = center - sideL
+                    Arrow.PointB = center - sideR
+                    Arrow.PointC = center - tip
+                    Arrow.Color = rainbow
+                    Arrow.Visible = true
+                else
+                    Arrow.Visible = false
+                end
+            end
+        else
+            skel:SetVisible(false)
+            Arrow.Visible = false
+            NameTag.Visible = false
+            for _, v in pairs(Library) do v.Visible = false end
+            if not Players:FindFirstChild(plr.Name) then
+                for _, v in pairs(Library) do v:Remove() end
+                NameTag:Remove() Arrow:Remove() oripart:Destroy() con:Disconnect()
+            end
+        end
     end)
 end
 
--- ==========================================================
--- [5] СИСТЕМА ESP (FIXED & SMOOTH)
--- ==========================================================
-local function CreateESP(p)
-    local box = Drawing.new("Square")
-    box.Visible = false
-    box.Thickness = 1.5
-    
-    local name = Drawing.new("Text")
-    name.Visible = false
-    name.Size = 16
-    name.Center = true
-    name.Outline = true
-
-    local line = Drawing.new("Line")
-    line.Visible = false
-    line.Thickness = 1
-
-    local function Update()
-        local c
-        c = RunService.RenderStepped:Connect(function()
-            if getgenv().VasyaV16.Visuals.EspEnabled and p.Character and p.Character:FindFirstChild("HumanoidRootPart") and p.Character.Humanoid.Health > 0 then
-                local root = p.Character.HumanoidRootPart
-                local head = p.Character:FindFirstChild("Head")
-                local screenPos, on = Camera:WorldToViewportPoint(root.Position)
-                
-                if on and head then
-                    local headPos = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.5, 0))
-                    local legPos = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3, 0))
-                    local h = math.abs(headPos.Y - legPos.Y)
-                    local w = h * 0.6
-                    
-                    if getgenv().VasyaV16.Visuals.Boxes then
-                        box.Visible = true
-                        box.Size = Vector2.new(w, h)
-                        box.Position = Vector2.new(screenPos.X - w/2, screenPos.Y - h/2)
-                        box.Color = Color3.fromHSV(tick() % 5 / 5, 0.8, 1)
-                    else box.Visible = false end
-
-                    if getgenv().VasyaV16.Visuals.Names then
-                        name.Visible = true
-                        name.Text = p.Name .. " [" .. math.floor(p.Character.Humanoid.Health) .. "]"
-                        name.Position = Vector2.new(screenPos.X, screenPos.Y - h/2 - 20)
-                        name.Color = Color3.new(1,1,1)
-                    else name.Visible = false end
-                    
-                    if getgenv().VasyaV16.Visuals.Tracers then
-                        line.Visible = true
-                        line.From = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y)
-                        line.To = Vector2.new(screenPos.X, screenPos.Y)
-                        line.Color = box.Color
-                    else line.Visible = false end
-                else
-                    box.Visible = false
-                    name.Visible = false
-                    line.Visible = false
-                end
-            else
-                box.Visible = false
-                name.Visible = false
-                line.Visible = false
-                if not p.Parent then
-                    box:Destroy()
-                    name:Destroy()
-                    line:Destroy()
-                    c:Disconnect()
-                end
-            end
-        end)
-    end
-    task.spawn(Update)
-end
-
-for _, p in pairs(Players:GetPlayers()) do if p ~= LocalPlayer then CreateESP(p) end end
-Players.PlayerAdded:Connect(CreateESP)
-
--- ==========================================================
--- [6] МЕХАНИКА ПОЛЕТА (F-BIND)
--- ==========================================================
-local function HandleFly()
-    FlyActive = not FlyActive
-    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+-- 6. ЛОГИКА ПОЛЕТА (FLY)
+local function ToggleFly()
+    isFlying = not isFlying
+    local char = LocalPlayer.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
     if not root then return end
 
-    if FlyActive then
-        BodyVel = Instance.new("BodyVelocity", root)
-        BodyVel.MaxForce = Vector3.new(1e9, 1e9, 1e9)
-        BodyGyro = Instance.new("BodyGyro", root)
-        BodyGyro.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
-        BodyGyro.P = 15000
+    if isFlying then
+        flyBV = Instance.new("BodyVelocity", root)
+        flyBV.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+        flyBG = Instance.new("BodyGyro", root)
+        flyBG.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
+        flyBG.P = 15000
     else
-        if BodyVel then BodyVel:Destroy() end
-        if BodyGyro then BodyGyro:Destroy() end
+        if flyBV then flyBV:Destroy() end
+        if flyBG then flyBG:Destroy() end
     end
 end
 
-UIS.InputBegan:Connect(function(i, g)
-    if i.KeyCode == getgenv().VasyaV16.Movement.FlyKey and getgenv().VasyaV16.Movement.Fly then
-        HandleFly()
-    end
-end)
-
--- ==========================================================
--- [7] ГЛАВНЫЙ ИНТЕРФЕЙС (UI)
--- ==========================================================
-local window = library:CreateWindow({
-    Color = Color3.fromRGB(255, 0, 150),
-    Keybind = Enum.KeyCode.Delete,
-    InitialHeight = 650,
-    InitialWidth = 650
-}, gethui())
-
-local t1 = window:CreateTab("Combat")
-local s1 = t1:CreateSection("Aimbot", "left")
-s1:CreateToggle("Silent Aim", false, function(v) getgenv().VasyaV16.Combat.SilentAim = v end)
-s1:CreateSlider("FOV Radius", 50, 800, 150, false, function(v) getgenv().VasyaV16.Combat.FOV = v end)
-s1:CreateToggle("Visible Check", true, function(v) getgenv().VasyaV16.Combat.VisibleCheck = v end)
-s1:CreateDropdown("Hit Part", {"Head", "HumanoidRootPart", "Torso"}, "Head", function(v) getgenv().VasyaV16.Combat.HitPart = v end)
-
-local t2 = window:CreateTab("Visuals")
-local s2 = t2:CreateSection("ESP", "left")
-s2:CreateToggle("Master ESP", false, function(v) getgenv().VasyaV16.Visuals.EspEnabled = v end)
-s2:CreateToggle("Boxes", false, function(v) getgenv().VasyaV16.Visuals.Boxes = v end)
-s2:CreateToggle("Names", false, function(v) getgenv().VasyaV16.Visuals.Names = v end)
-s2:CreateToggle("Tracers (Lines)", false, function(v) getgenv().VasyaV16.Visuals.Tracers = v end)
-
-local s3 = t2:CreateSection("Environment", "right")
-s3:CreateSlider("Field of View", 70, 120, 70, false, function(v) getgenv().VasyaV16.Visuals.FovValue = v end)
-s3:CreateToggle("FullBright", false, function(v) getgenv().VasyaV16.Visuals.FullBright = v end)
-s3:CreateToggle("Bullet Tracers", false, function(v) getgenv().VasyaV16.Visuals.BulletTracers = v end)
-
-local t3 = window:CreateTab("Misc")
-local s4 = t3:CreateSection("Movement", "left")
-s4:CreateSlider("WalkSpeed", 16, 250, 16, false, function(v) getgenv().VasyaV16.Movement.WalkSpeed = v end)
-s4:CreateToggle("Fly (F-Key)", false, function(v) getgenv().VasyaV16.Movement.Fly = v end)
-s4:CreateSlider("Fly Speed", 10, 500, 50, false, function(v) getgenv().VasyaV16.Movement.FlySpeed = v end)
-s4:CreateKeybind("Change Fly Key", getgenv().VasyaV16.Movement.FlyKey, function(k) getgenv().VasyaV16.Movement.FlyKey = k end)
-
--- ==========================================================
--- [8] ЦИКЛ ОБНОВЛЕНИЯ (HEARTBEAT)
--- ==========================================================
-local circle = Drawing.new("Circle")
-circle.Thickness = 1
-circle.Color = Color3.new(1,1,1)
-
-RunService.RenderStepped:Connect(function()
-    CurrentTarget = getgenv().VasyaV16.Combat.SilentAim and GetBestTarget() or nil
+-- 7. ИНИЦИАЛИЗАЦИЯ И ЦИКЛЫ
+RunService.Heartbeat:Connect(function()
+    target.position = _G.SilentAimEnabled and getClosestTarget() or nil
     
-    -- FOV Circle Update
-    circle.Visible = getgenv().VasyaV16.Combat.SilentAim
-    circle.Radius = getgenv().VasyaV16.Combat.FOV
-    circle.Position = UIS:GetMouseLocation()
-    
-    -- Character Mods
-    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
-        LocalPlayer.Character.Humanoid.WalkSpeed = getgenv().VasyaV16.Movement.WalkSpeed
-    end
-    
-    -- Force FOV
-    Camera.FieldOfView = getgenv().VasyaV16.Visuals.FovValue
-    
-    -- Fly Physics
-    if FlyActive and BodyVel and BodyGyro then
-        local d = Vector3.zero
+    -- Обработка физики полета
+    if isFlying and flyBV and flyBG and LocalPlayer.Character then
+        local moveDir = Vector3.zero
         local cf = Camera.CFrame
-        if UIS:IsKeyDown("W") then d += cf.LookVector end
-        if UIS:IsKeyDown("S") then d -= cf.LookVector end
-        if UIS:IsKeyDown("A") then d -= cf.RightVector end
-        if UIS:IsKeyDown("D") then d += cf.RightVector end
-        if UIS:IsKeyDown("Space") then d += Vector3.new(0,1,0) end
-        BodyVel.Velocity = d * getgenv().VasyaV16.Movement.FlySpeed
-        BodyGyro.CFrame = cf
-    end
-    
-    -- FullBright
-    if getgenv().VasyaV16.Visuals.FullBright then
-        Lighting.Ambient = Color3.new(1,1,1)
-        Lighting.Brightness = 2
+        if UIS:IsKeyDown("W") then moveDir += cf.LookVector end
+        if UIS:IsKeyDown("S") then moveDir -= cf.LookVector end
+        if UIS:IsKeyDown("A") then moveDir -= cf.RightVector end
+        if UIS:IsKeyDown("D") then moveDir += cf.RightVector end
+        if UIS:IsKeyDown("Space") then moveDir += Vector3.new(0, 1, 0) end
+        if UIS:IsKeyDown("LeftShift") then moveDir -= Vector3.new(0, 1, 0) end
+        
+        flyBV.Velocity = moveDir * _G.FlySpeed
+        flyBG.CFrame = cf
+        LocalPlayer.Character.HumanoidRootPart.Velocity = Vector3.zero
     end
 end)
 
-print("VasyaDrun V16 — STABLE VERSION LOADED")
+UIS.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if input.KeyCode == Enum.KeyCode.F and _G.FlyEnabled then
+        ToggleFly()
+    end
+end)
+
+for _, v in pairs(Players:GetPlayers()) do if v ~= LocalPlayer then MainESP(v) end end
+Players.PlayerAdded:Connect(MainESP)
+
+-- 8. GUI ТАБЫ
+local tabs = { 
+    combat = window:CreateTab("Combat"), 
+    visuals = window:CreateTab("Visuals"),
+    misc = window:CreateTab("Misc")
+}
+
+local combat_sec = tabs.combat:CreateSection("Silent Aim", "left")
+combat_sec:CreateToggle("Enable Silent Aim", false, function(v) _G.SilentAimEnabled = v end)
+combat_sec:CreateToggle("Wall Check", false, function(v) _G.WallCheck = v end)
+combat_sec:CreateDropdown("Hit Part", {"Head", "HumanoidRootPart", "UpperTorso"}, function(v) _G.TargetPart = v end, "Head")
+combat_sec:CreateSlider("FOV Size", 50, 800, 150, false, function(v) _G.FOVSize = v end)
+
+local visual_sec = tabs.visuals:CreateSection("ESP Settings", "left")
+visual_sec:CreateToggle("Enable GOD ESP", false, function(v) _G.EspEnabled = v end)
+
+local misc_sec = tabs.misc:CreateSection("Movement", "left")
+misc_sec:CreateToggle("Enable Fly (Key F)", false, function(v) _G.FlyEnabled = v end)
+misc_sec:CreateSlider("Fly Speed", 10, 300, 50, false, function(v) _G.FlySpeed = v end)
+
+local fov_circle = Drawing.new("Circle")
+fov_circle.Thickness = 1 fov_circle.Color = Color3.new(1,1,1)
+RunService.RenderStepped:Connect(function()
+    fov_circle.Visible = _G.SilentAimEnabled
+    fov_circle.Radius = _G.FOVSize
+    fov_circle.Position = UIS:GetMouseLocation()
+end)
