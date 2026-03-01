@@ -1,24 +1,15 @@
---[[
-    VasyaDrun PRIVATE V17 (OLD CORE RESTORED)
-    - SILENT AIM: RESTORED (Old Method)
-    - ESP: GOD MODE (Skeletons, Arrows, Corners)
-    - NEW: FLY SYSTEM ADDED
-]]
-
--- 1. ЗАГРУЗКА БИБЛИОТЕК
 local library = loadstring(game:HttpGet("https://raw.githubusercontent.com/nfpw/XXSCRIPT/heads/main/Library/Module.lua"))()
 local SkelLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/Blissful4992/ESPs/main/UniversalSkeleton.lua"))()
 
 local window = library:CreateWindow({
     Color = Color3.fromRGB(255, 255, 255),
     Keybind = Enum.KeyCode.Delete,
-    InitialHeight = 500, -- Немного увеличил высоту для новой вкладки
+    InitialHeight = 500,
     InitialWidth = 550
 }, gethui())
 
-library:SetWindowName("VasyaDrun | GOD MODE V17")
+library:SetWindowName("VasyaDrun | PRIVATE")
 
--- 2. СЕРВИСЫ И НАСТРОЙКИ
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UIS = game:GetService("UserInputService")
@@ -30,16 +21,13 @@ _G.TargetPart = "Head"
 _G.FOVSize = 150
 _G.WallCheck = false
 _G.EspEnabled = false
-
--- Настройки Fly
 _G.FlyEnabled = false
 _G.FlySpeed = 50
+
 local isFlying = false
 local flyBV, flyBG
-
 local target = { enabled = true, position = nil }
 
--- Настройки стрелочек
 local ArrowSettings = {
     DistFromCenter = 80,
     Height = 16,
@@ -47,7 +35,6 @@ local ArrowSettings = {
     Color = Color3.fromRGB(255, 255, 255)
 }
 
--- 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (Silent Aim & Math)
 local function isVisible(part, character)
     local origin = Camera.CFrame.Position
     local destination = part.Position
@@ -93,7 +80,6 @@ local function RotateVect(v, a)
     return Vector2.new(v.x * math.cos(a) - v.y * math.sin(a), v.x * math.sin(a) + v.y * math.cos(a))
 end
 
--- 4. ХУК RAYCAST
 local oldNamecall
 oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
     local args = {...}
@@ -105,7 +91,6 @@ oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
     return oldNamecall(self, ...)
 end))
 
--- 5. ГЛАВНАЯ ФУНКЦИЯ ESP
 local function MainESP(plr)
     local Library = {
         TL1 = Drawing.new("Line"), TL2 = Drawing.new("Line"),
@@ -194,7 +179,6 @@ local function MainESP(plr)
     end)
 end
 
--- 6. ЛОГИКА ПОЛЕТА (FLY)
 local function ToggleFly()
     isFlying = not isFlying
     local char = LocalPlayer.Character
@@ -213,11 +197,9 @@ local function ToggleFly()
     end
 end
 
--- 7. ИНИЦИАЛИЗАЦИЯ И ЦИКЛЫ
 RunService.Heartbeat:Connect(function()
     target.position = _G.SilentAimEnabled and getClosestTarget() or nil
     
-    -- Обработка физики полета
     if isFlying and flyBV and flyBG and LocalPlayer.Character then
         local moveDir = Vector3.zero
         local cf = Camera.CFrame
@@ -244,24 +226,23 @@ end)
 for _, v in pairs(Players:GetPlayers()) do if v ~= LocalPlayer then MainESP(v) end end
 Players.PlayerAdded:Connect(MainESP)
 
--- 8. GUI ТАБЫ
 local tabs = { 
     combat = window:CreateTab("Combat"), 
     visuals = window:CreateTab("Visuals"),
     misc = window:CreateTab("Misc")
 }
 
-local combat_sec = tabs.combat:CreateSection("Silent Aim", "left")
-combat_sec:CreateToggle("Enable Silent Aim", false, function(v) _G.SilentAimEnabled = v end)
+local combat_sec = tabs.combat:CreateSection("VasyaDrun Combat", "left")
+combat_sec:CreateToggle("Silent Aim", false, function(v) _G.SilentAimEnabled = v end)
 combat_sec:CreateToggle("Wall Check", false, function(v) _G.WallCheck = v end)
-combat_sec:CreateDropdown("Hit Part", {"Head", "HumanoidRootPart", "UpperTorso"}, function(v) _G.TargetPart = v end, "Head")
+combat_sec:CreateDropdown("Target Part", {"Head", "HumanoidRootPart", "UpperTorso"}, function(v) _G.TargetPart = v end, "Head")
 combat_sec:CreateSlider("FOV Size", 50, 800, 150, false, function(v) _G.FOVSize = v end)
 
-local visual_sec = tabs.visuals:CreateSection("ESP Settings", "left")
-visual_sec:CreateToggle("Enable GOD ESP", false, function(v) _G.EspEnabled = v end)
+local visual_sec = tabs.visuals:CreateSection("VasyaDrun Visuals", "left")
+visual_sec:CreateToggle("ESP", false, function(v) _G.EspEnabled = v end)
 
-local misc_sec = tabs.misc:CreateSection("Movement", "left")
-misc_sec:CreateToggle("Enable Fly (Key F)", false, function(v) _G.FlyEnabled = v end)
+local misc_sec = tabs.misc:CreateSection("VasyaDrun Misc", "left")
+misc_sec:CreateToggle("Fly (F)", false, function(v) _G.FlyEnabled = v end)
 misc_sec:CreateSlider("Fly Speed", 10, 300, 50, false, function(v) _G.FlySpeed = v end)
 
 local fov_circle = Drawing.new("Circle")
